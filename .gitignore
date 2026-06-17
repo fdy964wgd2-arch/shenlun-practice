@@ -1,0 +1,9 @@
+# Dependencies
+*.py
+*.bat
+fenbi_batch_scrape.py
+merge_fixed.py
+data/fenbi_*.json
+data/*.py
+data/*.js
+__pycache__/

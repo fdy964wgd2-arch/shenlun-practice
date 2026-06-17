@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>申论智能练习系统</title>
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div id="app">
+        <aside id="sidebar">
+            <div class="logo" onclick="navigateTo('home')" style="cursor:pointer;">
+                <span class="logo-icon">📝</span>
+            </div>
+            <div id="sidebar-user-area">
+                <div class="sidebar-auth-btns" id="sidebar-auth-btns">
+                    <button class="btn btn-primary btn-sm" onclick="showAuthModal('login')">登录</button>
+                    <button class="btn btn-outline btn-sm" onclick="showAuthModal('register')">注册</button>
+                </div>
+                <div class="sidebar-user" id="sidebar-user-info" style="display:none;">
+                    <div class="sidebar-user-avatar" id="sidebar-avatar" onclick="document.getElementById('avatar-upload').click()">👤</div>
+                    <div class="sidebar-user-info">
+                        <div class="sidebar-user-name" id="sidebar-nickname"></div>
+                        <div class="sidebar-user-role" style="cursor:pointer;" onclick="logout()">退出登录</div>
+                    </div>
+                </div>
+            </div>
+            <input type="file" id="avatar-upload" accept="image/*" style="display:none;" onchange="uploadAvatar(event)">
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-page="home"><span class="nav-icon">🏠</span> 首页</a>
+                <a href="#" class="nav-item" data-page="papers"><span class="nav-icon">📋</span> 试卷列表</a>
+                <a href="#" class="nav-item" data-page="practice"><span class="nav-icon">✍️</span> 专项练习</a>
+                <a href="#" class="nav-item" data-page="history"><span class="nav-icon">📊</span> 答题记录</a>
+                <a href="#" class="nav-item" data-page="scrape"><span class="nav-icon">🔄</span> 题库管理</a>
+            </nav>
+            <div class="sidebar-footer"><span class="version">v2.0</span></div>
+        </aside>
+
+        <main id="main-content">
+            <div class="breadcrumb" id="breadcrumb">
+                <a href="#" onclick="navigateTo('home')">🏠 首页</a>
+                <span class="breadcrumb-sep">›</span>
+                <span class="breadcrumb-current" id="breadcrumb-current">首页</span>
+            </div>
+
+            <!-- ========== 首页 ========== -->
+            <div id="page-home" class="page active">
+                <div class="hero">
+                    <h1>申论智能练习系统</h1>
+                    <p>海量申论真题 · AI 智能评分 · 精准提分建议</p>
+                </div>
+                <div class="stats-grid">
+                    <div class="stat-card"><div class="stat-number" id="stat-papers">0</div><div class="stat-label">可用试卷</div></div>
+                    <div class="stat-card"><div class="stat-number" id="stat-questions">0</div><div class="stat-label">题库总量</div></div>
+                    <div class="stat-card"><div class="stat-number" id="stat-completed">0</div><div class="stat-label">已完成</div></div>
+                    <div class="stat-card"><div class="stat-number" id="stat-avgscore">--</div><div class="stat-label">平均得分</div></div>
+                </div>
+                <div class="quick-actions">
+                    <button class="btn btn-primary" onclick="navigateTo('papers')">📋 开始套卷练习</button>
+                    <button class="btn btn-secondary" onclick="navigateTo('practice')">✍️ 专项练习</button>
+                    <button class="btn btn-outline" onclick="navigateTo('history')">📊 查看答题记录</button>
+                </div>
+            </div>
+
+            <!-- ========== 试卷列表 ========== -->
+            <div id="page-papers" class="page">
+                <div class="page-header"><h2>📋 试卷列表</h2></div>
+                <div class="category-tabs" id="category-tabs">
+                    <button class="cat-tab active" data-cat="real">📚 历年真题</button>
+                    <button class="cat-tab" data-cat="net">🌐 网络试卷</button>
+                    <button class="cat-tab" data-cat="generate">🤖 生成试卷</button>
+                    <button class="cat-tab" data-cat="user">👤 网友上传</button>
+                </div>
+                <div class="filter-bar" id="papers-filter-bar">
+                    <select id="filter-category" class="filter-select">
+                        <option value="all">全部类别</option>
+                        <option value="国考">国考</option>
+                        <option value="省考">省考</option>
+                    </select>
+                    <select id="filter-year" class="filter-select">
+                        <option value="all">全部年份</option>
+                    </select>
+                    <button class="btn btn-outline btn-sm" onclick="showUploadForm()" style="margin-left:auto;">📤 上传试卷</button>
+                </div>
+                <div id="papers-list" class="papers-grid"></div>
+                <div id="generate-section" class="generate-form" style="display:none;">
+                    <h3>🤖 AI 生成试卷</h3>
+                    <p style="color:var(--text-secondary);margin-bottom:16px;">输入题目主题和给定资料，AI将自动生成一套完整的申论试卷（含评分标准）</p>
+                    <div class="form-group">
+                        <label>试卷主题</label>
+                        <input type="text" id="gen-theme" placeholder="如：数字经济与乡村振兴">
+                    </div>
+                    <div class="form-group">
+                        <label>给定资料（用于生成题目背景）</label>
+                        <textarea id="gen-materials" rows="8" placeholder="请输入或粘贴相关材料...&#10;&#10;AI将扫描内容，非法内容将被拒绝上传。"></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>题目数量</label>
+                        <select id="gen-count">
+                            <option value="3">3题（2小题 + 1大作文）</option>
+                            <option value="4" selected>4题（3小题 + 1大作文）</option>
+                            <option value="5">5题（4小题 + 1大作文）</option>
+                        </select>
+                    </div>
+                    <button class="btn btn-primary" onclick="generatePaper()">🤖 生成试卷</button>
+                    <div id="gen-status" style="margin-top:12px;"></div>
+                </div>
+            </div>
+
+            <!-- ========== 专项练习 ========== -->
+            <div id="page-practice" class="page">
+                <div class="page-header"><h2>✍️ 专项练习</h2><p class="page-desc">按题型分类练习，针对性提升薄弱环节</p></div>
+                <div class="practice-types">
+                    <div class="practice-card" onclick="startTypePractice('概括归纳')"><span class="practice-icon">📝</span><h3>概括归纳题</h3><p>概括做法、经验、问题、原因等</p><span class="practice-count" id="count-概括归纳">0题可用</span></div>
+                    <div class="practice-card" onclick="startTypePractice('综合分析')"><span class="practice-icon">🔍</span><h3>综合分析题</h3><p>分析原因、影响、关系等</p><span class="practice-count" id="count-综合分析">0题可用</span></div>
+                    <div class="practice-card" onclick="startTypePractice('对策建议')"><span class="practice-icon">💡</span><h3>对策建议题</h3><p>提出建议、措施、方案等</p><span class="practice-count" id="count-对策建议">0题可用</span></div>
+                    <div class="practice-card" onclick="startTypePractice('大作文')"><span class="practice-icon">📄</span><h3>大作文</h3><p>议论文写作，自拟题目</p><span class="practice-count" id="count-大作文">0题可用</span></div>
+                </div>
+            </div>
+
+            <!-- ========== 答题页（全屏） ========== -->
+            <div id="page-exam-full" class="page-exam-full"></div>
+
+            <!-- ========== 评分结果 ========== -->
+            <div id="page-result" class="page"></div>
+
+            <!-- ========== 答题记录 ========== -->
+            <div id="page-history" class="page">
+                <div class="page-header"><h2>📊 答题记录</h2><button class="btn btn-outline btn-sm" onclick="clearHistory()">清空记录</button></div>
+                <div id="history-list" class="history-list"></div>
+            </div>
+
+            <!-- ========== 题库管理 ========== -->
+            <div id="page-scrape" class="page">
+                <div class="page-header"><h2>🔄 题库管理</h2><p class="page-desc">从互联网导入题库数据，支持多种来源</p></div>
+                <div class="scrape-section">
+                    <div class="scrape-card">
+                        <h3>📥 从互联网导入题库</h3>
+                        <p>从各类公开的申论题库网站抓取试卷和题目数据，自动导入到本地题库。</p>
+                        <div class="scrape-steps">
+                            <h4>操作步骤：</h4>
+                            <ol>
+                                <li>打开任意申论题库网站并登录</li>
+                                <li>按 F12 打开浏览器开发者工具</li>
+                                <li>切换到 Console（控制台）标签</li>
+                                <li>粘贴下方抓取脚本并回车运行</li>
+                                <li>复制输出的 JSON 数据，粘贴到下方文本框</li>
+                                <li>点击「导入数据」完成入库</li>
+                            </ol>
+                        </div>
+                        <details class="scrape-script">
+                            <summary>📜 通用抓取脚本（点击展开）</summary>
+                            <pre><code id="scrape-script-code"></code></pre>
+                            <button class="btn btn-sm btn-secondary" onclick="copyScrapeScript()">📋 复制脚本</button>
+                        </details>
+                        <textarea id="scrape-input" class="scrape-textarea" placeholder="将抓取到的 JSON 数据粘贴到这里..."></textarea>
+                        <button class="btn btn-primary" onclick="importScrapedData()">📥 导入数据</button>
+                        <div id="scrape-status"></div>
+                    </div>
+                    <div class="scrape-card">
+                        <h3>📂 手动添加题目</h3>
+                        <p>如果无法自动导入，可以手动录入题目到题库中。</p>
+                        <button class="btn btn-secondary" onclick="showManualAddForm()">➕ 手动添加题目</button>
+                    </div>
+                </div>
+                <div id="manual-add-form" class="manual-form" style="display:none;">
+                    <h3>手动添加题目</h3>
+                    <div class="form-group"><label>试卷名称</label><input type="text" id="ma-paperName" placeholder="如：2026年国考申论（副省级）"></div>
+                    <div class="form-row">
+                        <div class="form-group"><label>类别</label><select id="ma-category"><option value="国考">国考</option><option value="省考">省考</option></select></div>
+                        <div class="form-group"><label>年份</label><input type="number" id="ma-year" value="2026"></div>
+                        <div class="form-group"><label>题号</label><input type="number" id="ma-qnum" value="1" min="1" max="10"></div>
+                        <div class="form-group"><label>分值</label><input type="number" id="ma-maxScore" value="15" min="1" max="100"></div>
+                    </div>
+                    <div class="form-group"><label>题目</label><input type="text" id="ma-title" placeholder="题目内容"></div>
+                    <div class="form-group"><label>要求</label><input type="text" id="ma-requirements" placeholder="答题要求"></div>
+                    <div class="form-group"><label>给定资料</label><textarea id="ma-materials" rows="8" placeholder="给定资料内容"></textarea></div>
+                    <div class="form-group"><label>参考答案</label><textarea id="ma-reference" rows="6" placeholder="参考答案"></textarea></div>
+                    <div class="form-group"><label>评分要点（每行一个，格式：要点内容|分值）</label><textarea id="ma-scorePoints" rows="4" placeholder="概括全面|5&#10;条理清晰|5&#10;语言流畅|5"></textarea></div>
+                    <button class="btn btn-primary" onclick="addManualQuestion()">✅ 添加题目</button>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>

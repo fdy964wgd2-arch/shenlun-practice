@@ -1,0 +1,560 @@
+﻿// ==================== 申论智能练习系统 v2.0 - 核心脚本 ====================
+
+// ========== 全局状�?==========
+const APP = {
+    questions: [],
+    papers: [],
+    history: [],
+    currentExam: null,
+    examTimer: null,
+    examSeconds: 0,
+    pageHistory: ['home'],
+    pendingConfirm: null,
+    currentUser: null,
+    currentPapersTab: 'real',
+    currentExamPaperId: null,
+    currentExamSource: null,
+};
+
+const PAGE_NAMES = {
+    'home': '首页',
+    'papers': '试卷列表',
+    'practice': '专项练习',
+    'history': '答题记录',
+    'history-detail': '答题详情',
+    'scrape': '题库管理',
+    'result': '评分结果',
+    'exam': '答题�?,
+};
+
+const ILLEGAL_KEYWORDS = [
+    '色情', '淫秽', '赌博', '毒品', '枪支', '暴力恐�?, '颠覆国家',
+    '分裂国家', '邪教', '杀�?, '自杀', '贩毒', '制毒', '卖淫',
+    '嫖娼', '裸体', '性交', '强奸', '轮奸', '爆炸�?, '恐怖袭�?,
+    '政治敏感', '反革�?, '颠覆', '政变', '暴动', '动乱',
+];
+
+// ========== 初始�?==========
+document.addEventListener('DOMContentLoaded', async () => {
+    initNavigation();
+    initConfirmModal();
+    initAuthModal();
+    loadCurrentUser();
+    await loadData();
+    initFilters();
+    updateHomeStats();
+    updateBreadcrumb('home');
+    updateSidebarUI();
+});
+
+// ========== 账号系统 ==========
+function getAllUsers() {
+    return JSON.parse(localStorage.getItem('shenlun_users') || '[]');
+}
+function saveAllUsers(users) {
+    localStorage.setItem('shenlun_users', JSON.stringify(users));
+}
+function getCurrentUser() {
+    return JSON.parse(localStorage.getItem('shenlun_current_user') || 'null');
+}
+function setCurrentUser(user) {
+    APP.currentUser = user;
+    if (user) localStorage.setItem('shenlun_current_user', JSON.stringify(user));
+    else localStorage.removeItem('shenlun_current_user');
+}
+function loadCurrentUser() {
+    APP.currentUser = getCurrentUser();
+}
+function getUserKey(key) {
+    return APP.currentUser ? 'shenlun_' + APP.currentUser.username + '_' + key : 'shenlun_' + key;
+}
+
+function updateSidebarUI() {
+    var authArea = document.getElementById('sidebar-auth-area');
+    var userInfo = document.getElementById('sidebar-user-info');
+    if (APP.currentUser) {
+        authArea.style.display = 'none';
+        userInfo.style.display = 'flex';
+        document.getElementById('sidebar-nickname').textContent = APP.currentUser.nickname;
+        var avatarDisplay = document.getElementById('user-avatar-display');
+        if (APP.currentUser.avatar) {
+            avatarDisplay.innerHTML = '<img src="' + APP.currentUser.avatar + '" class="user-avatar" alt="avatar">';
+        } else {
+            avatarDisplay.innerHTML = '\u{1F464}';
+            avatarDisplay.className = 'user-avatar-placeholder';
+        }
+    } else {
+        authArea.style.display = 'block';
+        userInfo.style.display = 'none';
+    }
+}
+
+function handleAvatarUpload(event) {
+    var file = event.target.files[0];
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function(e) {
+        APP.currentUser.avatar = e.target.result;
+        var users = getAllUsers();
+        var idx = users.findIndex(function(u) { return u.username === APP.currentUser.username; });
+        if (idx !== -1) { users[idx].avatar = e.target.result; saveAllUsers(users); }
+        setCurrentUser(APP.currentUser);
+        updateSidebarUI();
+        showToast('头像已更�?, 'success');
+    };
+    reader.readAsDataURL(file);
+}
+
+function showAuthModal(mode) {
+    var modal = document.getElementById('auth-modal');
+    var inner = document.getElementById('auth-modal-inner');
+    var isLogin = mode === 'login';
+    inner.innerHTML =
+        '<h3>' + (isLogin ? '🔑 登录' : '📝 注册') + '</h3>' +
+        '<div class="form-group">' +
+            '<label>账号</label>' +
+            '<input type="text" id="auth-username" placeholder="大小写字�?数字" maxlength="20">' +
+            '<span class="form-hint">大小写字�?+ 数字，如：User123</span>' +
+            '<div class="form-error" id="auth-username-error"></div>' +
+        '</div>' +
+        '<div class="form-group">' +
+            '<label>密码</label>' +
+            '<input type="password" id="auth-password" placeholder="大小写字�?数字+特殊符号" maxlength="30">' +
+            '<span class="form-hint">大小写字�?+ 数字 + 特殊符号</span>' +
+            '<div class="form-error" id="auth-password-error"></div>' +
+        '</div>' +
+        (!isLogin ?
+        '<div class="form-group">' +
+            '<label>昵称</label>' +
+            '<input type="text" id="auth-nickname" placeholder="至少2个汉字或4字节" maxlength="20">' +
+            '<span class="form-hint">最�?个汉字或4字节，不能纯特殊符号</span>' +
+            '<div class="form-error" id="auth-nickname-error"></div>' +
+        '</div>' : '') +
+        '<button class="btn btn-primary" onclick="' + (isLogin ? 'handleLogin()' : 'handleRegister()') + '">' + (isLogin ? '登录' : '注册') + '</button>' +
+        '<div class="auth-switch">' +
+            (isLogin ? '没有账号�?a onclick="showAuthModal(\'register\')">立即注册</a>' : '已有账号�?a onclick="showAuthModal(\'login\')">立即登录</a>') +
+        '</div>';
+    modal.style.display = 'flex';
+    var inputs = inner.querySelectorAll('input');
+    inputs.forEach(function(input) {
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') { if (isLogin) handleLogin(); else handleRegister(); }
+        });
+    });
+    setTimeout(function() { inputs[0].focus(); }, 100);
+}
+
+function closeAuthModal() {
+    document.getElementById('auth-modal').style.display = 'none';
+}
+
+function initAuthModal() {
+    document.getElementById('auth-modal').addEventListener('click', function(e) {
+        if (e.target === this) closeAuthModal();
+    });
+}
+
+function validateUsername(username) { return /^[a-zA-Z0-9]+$/.test(username); }
+
+function validatePassword(password) {
+    return /[A-Z]/.test(password) && /[a-z]/.test(password) && /[0-9]/.test(password) && /[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~]/.test(password);
+}
+
+function validateNickname(nickname) {
+    if (!nickname || nickname.trim().length === 0) return false;
+    if (/^[!@#$%^&*()_+\-=\[\]{};':"\\|,.<>\/?`~\s]+$/.test(nickname)) return false;
+    var chineseChars = nickname.match(/[\u4e00-\u9fff]/g);
+    var chineseCount = chineseChars ? chineseChars.length : 0;
+    var byteCount = 0;
+    for (var i = 0; i < nickname.length; i++) {
+        byteCount += (nickname.charCodeAt(i) >= 0x4e00 && nickname.charCodeAt(i) <= 0x9fff) ? 2 : 1;
+    }
+    return chineseCount >= 2 || byteCount >= 4;
+}
+
+function handleLogin() {
+    var username = document.getElementById('auth-username').value.trim();
+    var password = document.getElementById('auth-password').value;
+    document.getElementById('auth-username-error').textContent = '';
+    document.getElementById('auth-password-error').textContent = '';
+    if (!username) { document.getElementById('auth-username-error').textContent = '请输入账�?; return; }
+    if (!password) { document.getElementById('auth-password-error').textContent = '请输入密�?; return; }
+    var users = getAllUsers();
+    var user = users.find(function(u) { return u.username === username && u.password === password; });
+    if (!user) { document.getElementById('auth-password-error').textContent = '账号或密码错�?; return; }
+    setCurrentUser(user);
+    closeAuthModal();
+    updateSidebarUI();
+    loadUserData();
+    updateHomeStats();
+    showToast('欢迎回来�? + user.nickname + '�?, 'success');
+    if (document.getElementById('page-papers').classList.contains('active')) switchPapersTab(APP.currentPapersTab);
+    if (document.getElementById('page-history').classList.contains('active')) renderHistory();
+}
+
+function handleRegister() {
+    var username = document.getElementById('auth-username').value.trim();
+    var password = document.getElementById('auth-password').value;
+    var nickname = document.getElementById('auth-nickname').value.trim();
+    document.getElementById('auth-username-error').textContent = '';
+    document.getElementById('auth-password-error').textContent = '';
+    document.getElementById('auth-nickname-error').textContent = '';
+    if (!username) { document.getElementById('auth-username-error').textContent = '请输入账�?; return; }
+    if (!validateUsername(username)) { document.getElementById('auth-username-error').textContent = '账号只能包含大小写字母和数字'; return; }
+    if (username.length < 3) { document.getElementById('auth-username-error').textContent = '账号至少3�?; return; }
+    if (!password) { document.getElementById('auth-password-error').textContent = '请输入密�?; return; }
+    if (!validatePassword(password)) { document.getElementById('auth-password-error').textContent = '密码需包含大小写字母、数字和特殊符号'; return; }
+    if (password.length < 6) { document.getElementById('auth-password-error').textContent = '密码至少6�?; return; }
+    if (!nickname) { document.getElementById('auth-nickname-error').textContent = '请输入昵�?; return; }
+    if (!validateNickname(nickname)) { document.getElementById('auth-nickname-error').textContent = '昵称至少2个汉字或4字节，不能纯特殊符号'; return; }
+    var users = getAllUsers();
+    if (users.find(function(u) { return u.username === username; })) { document.getElementById('auth-username-error').textContent = '该账号已被注�?; return; }
+    if (users.find(function(u) { return u.nickname === nickname; })) { document.getElementById('auth-nickname-error').textContent = '该名字已被注�?; return; }
+    var newUser = { username: username, password: password, nickname: nickname, avatar: null, createdAt: new Date().toISOString() };
+    users.push(newUser);
+    saveAllUsers(users);
+    setCurrentUser(newUser);
+    closeAuthModal();
+    updateSidebarUI();
+    loadUserData();
+    updateHomeStats();
+    showToast('注册成功！欢迎，' + nickname + '�?, 'success');
+    if (document.getElementById('page-papers').classList.contains('active')) switchPapersTab(APP.currentPapersTab);
+}
+
+function logout() {
+    setCurrentUser(null);
+    updateSidebarUI();
+    loadUserData();
+    updateHomeStats();
+    if (document.getElementById('page-papers').classList.contains('active')) switchPapersTab(APP.currentPapersTab);
+    if (document.getElementById('page-history').classList.contains('active')) renderHistory();
+    showToast('已退出登�?, 'info');
+}
+
+// ========== 数据加载 ==========
+async function loadData() {
+    try {
+        var results = await Promise.all([fetch('data/questions.json'), fetch('data/papers.json')]);
+        APP.questions = await results[0].json();
+        APP.papers = await results[1].json();
+    } catch (e) {
+        console.error('加载题库失败:', e);
+        APP.questions = [];
+        APP.papers = [];
+    }
+    var localQuestions = JSON.parse(localStorage.getItem('shenlun_questions') || '[]');
+    localQuestions.forEach(function(q) { if (!APP.questions.find(function(eq) { return eq.id === q.id; })) APP.questions.push(q); });
+    var localPapers = JSON.parse(localStorage.getItem('shenlun_papers') || '[]');
+    localPapers.forEach(function(p) { if (!APP.papers.find(function(ep) { return ep.id === p.id; })) APP.papers.push(p); });
+    // 加载AI生成题目
+    var genQuestions = JSON.parse(localStorage.getItem('shenlun_generated_questions') || '[]');
+    genQuestions.forEach(function(q) { if (!APP.questions.find(function(eq) { return eq.id === q.id; })) APP.questions.push(q); });
+    var genPapers = JSON.parse(localStorage.getItem('shenlun_generated_papers') || '[]');
+    genPapers.forEach(function(p) { if (!APP.papers.find(function(ep) { return ep.id === p.id; })) APP.papers.push(p); });
+    // 加载网友上传题目和试�?    var userQuestions = JSON.parse(localStorage.getItem('shenlun_user_questions') || '[]');
+    userQuestions.forEach(function(q) { if (!APP.questions.find(function(eq) { return eq.id === q.id; })) APP.questions.push(q); });
+    var userPapers = JSON.parse(localStorage.getItem('shenlun_user_papers') || '[]');
+    userPapers.forEach(function(p) { if (!APP.papers.find(function(ep) { return ep.id === p.id; })) APP.papers.push(p); });
+    loadUserData();
+}
+
+function loadUserData() {
+    APP.history = JSON.parse(localStorage.getItem(getUserKey('history')) || '[]');
+}
+
+function saveHistory() {
+    localStorage.setItem(getUserKey('history'), JSON.stringify(APP.history));
+}
+
+// ========== 导航 ==========
+function initNavigation() {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        item.addEventListener('click', function(e) {
+            e.preventDefault();
+            navigateTo(item.dataset.page);
+        });
+    });
+}
+
+function updateBreadcrumb(page) {
+    var current = document.getElementById('breadcrumb-current');
+    if (current) current.textContent = PAGE_NAMES[page] || page;
+    var breadcrumb = document.getElementById('breadcrumb');
+    breadcrumb.style.display = (page === 'exam') ? 'none' : '';
+}
+
+function initConfirmModal() {
+    document.getElementById('confirm-cancel').addEventListener('click', function() {
+        document.getElementById('confirm-modal').style.display = 'none';
+        if (APP.pendingConfirm) { APP.pendingConfirm.resolve(false); APP.pendingConfirm = null; }
+    });
+    document.getElementById('confirm-ok').addEventListener('click', function() {
+        document.getElementById('confirm-modal').style.display = 'none';
+        if (APP.pendingConfirm) { APP.pendingConfirm.resolve(true); APP.pendingConfirm = null; }
+    });
+}
+
+function showConfirm(title, message) {
+    return new Promise(function(resolve) {
+        APP.pendingConfirm = { resolve: resolve };
+        document.getElementById('confirm-title').textContent = title;
+        document.getElementById('confirm-message').textContent = message;
+        document.getElementById('confirm-modal').style.display = 'flex';
+    });
+}
+
+async function navigateTo(page) {
+    if (APP.currentExam && ['result', 'history', 'history-detail'].indexOf(page) === -1) {
+        var confirmed = await showConfirm('退出答�?, '确定要退出当前答题吗？未提交的答案将丢失�?);
+        if (!confirmed) return;
+        clearExam();
+    }
+    if (page !== 'exam') {
+        document.getElementById('sidebar').style.display = '';
+        document.getElementById('main-content').style.marginLeft = '';
+        document.getElementById('breadcrumb').style.display = '';
+    }
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        var p = item.dataset.page;
+        item.classList.toggle('active', p === page || (page === 'exam' && p === 'papers') || (page === 'history-detail' && p === 'history') || (page === 'result' && p === 'papers'));
+    });
+    document.querySelectorAll('.page').forEach(function(p) { p.classList.remove('active'); });
+    var targetPage = document.getElementById('page-' + page);
+    if (targetPage) targetPage.classList.add('active');
+    updateBreadcrumb(page);
+    if (APP.pageHistory[APP.pageHistory.length - 1] !== page) {
+        APP.pageHistory.push(page);
+        if (APP.pageHistory.length > 20) APP.pageHistory.shift();
+    }
+    switch (page) {
+        case 'home': updateHomeStats(); break;
+        case 'papers': switchPapersTab(APP.currentPapersTab); break;
+        case 'practice': renderPractice(); break;
+        case 'history': renderHistory(); break;
+        case 'scrape': initScrapePage(); break;
+    }
+}
+
+// ========== 首页 ==========
+function updateHomeStats() {
+    document.getElementById('stat-papers').textContent = APP.papers.length;
+    document.getElementById('stat-questions').textContent = APP.questions.length;
+    document.getElementById('stat-completed').textContent = APP.history.length;
+    if (APP.history.length > 0) {
+        var avg = APP.history.reduce(function(s, h) { return s + h.totalScore; }, 0) / APP.history.length;
+        document.getElementById('stat-avgscore').textContent = avg.toFixed(1);
+    } else {
+        document.getElementById('stat-avgscore').textContent = '--';
+    }
+}
+
+// ========== 筛�?==========
+function initFilters() {
+    var years = [];
+    APP.questions.forEach(function(q) { if (years.indexOf(q.year) === -1) years.push(q.year); });
+    years.sort(function(a, b) { return b - a; });
+    var yearSelect = document.getElementById('filter-year');
+    years.forEach(function(y) {
+        var opt = document.createElement('option');
+        opt.value = y;
+        opt.textContent = y + '�?;
+        yearSelect.appendChild(opt);
+    });
+    document.getElementById('filter-category').addEventListener('change', renderRealPapers);
+    document.getElementById('filter-year').addEventListener('change', renderRealPapers);
+}
+
+// ========== 试卷列表 - 四栏�?==========
+function switchPapersTab(tab) {
+    APP.currentPapersTab = tab;
+    document.querySelectorAll('.papers-tab').forEach(function(t) { t.classList.toggle('active', t.dataset.tab === tab); });
+    document.querySelectorAll('.papers-tab-content').forEach(function(c) { c.style.display = 'none'; });
+    var filterBar = document.querySelector('#page-papers .filter-bar');
+    if (tab === 'real') {
+        if (filterBar) filterBar.style.display = 'flex';
+        document.getElementById('papers-tab-real').style.display = 'block';
+        renderRealPapers();
+    } else {
+        if (filterBar) filterBar.style.display = 'none';
+        if (tab === 'net') { document.getElementById('papers-tab-net').style.display = 'block'; renderNetPapers(); }
+        else if (tab === 'generate') { document.getElementById('papers-tab-generate').style.display = 'block'; renderGeneratedPapers(); }
+        else if (tab === 'user') { document.getElementById('papers-tab-user').style.display = 'block'; renderUserPapers(); }
+    }
+}
+
+function renderRealPapers() {
+    var catFilter = (document.getElementById('filter-category') || {}).value || 'all';
+    var yearFilter = (document.getElementById('filter-year') || {}).value || 'all';
+    var filtered = APP.papers;
+    if (catFilter !== 'all') filtered = filtered.filter(function(p) { return p.category === catFilter; });
+    if (yearFilter !== 'all') filtered = filtered.filter(function(p) { return p.year == yearFilter; });
+    var container = document.getElementById('papers-tab-real');
+    if (filtered.length === 0) {
+        container.innerHTML = '<div class="history-empty"><div class="history-empty-icon">📭</div><p>暂无匹配的试�?/p></div>';
+        return;
+    }
+    container.innerHTML = '<div class="papers-grid">' + filtered.map(function(p) {
+        var badgeClass = p.category === '国�? ? 'badge-gk' : 'badge-sk';
+        return '<div class="paper-card" onclick="startPaperExam(\'' + p.id + '\', \'real\')">' +
+            '<div class="paper-card-header"><div class="paper-card-title">' + p.name + '</div><span class="paper-card-badge ' + badgeClass + '">' + p.category + '</span></div>' +
+            '<div class="paper-card-meta"><span>📝 ' + p.questions.length + '�?/span><span>📊 ' + p.totalScore + '�?/span><span>�?' + p.timeLimit + '分钟</span><span>📅 ' + p.year + '</span></div>' +
+            '<div class="paper-card-source">📚 历年真题</div></div>';
+    }).join('') + '</div>';
+}
+
+function renderNetPapers() {
+    var netPapers = JSON.parse(localStorage.getItem('shenlun_net_papers') || '[]');
+    var container = document.getElementById('net-papers-list');
+    if (netPapers.length === 0) {
+        container.innerHTML = '<div class="history-empty"><div class="history-empty-icon">🌐</div><p>暂无网络试卷</p><p style="font-size:13px;color:var(--text-muted);margin-top:8px;">可通过题库管理页面从网络导入试�?/p></div>';
+        return;
+    }
+    container.innerHTML = netPapers.map(function(p) {
+        return '<div class="paper-card" onclick="startPaperExam(\'' + p.id + '\', \'net\')">' +
+            '<div class="paper-card-header"><div class="paper-card-title">' + p.name + '</div><span class="paper-card-badge badge-gk">网络</span></div>' +
+            '<div class="paper-card-meta"><span>📝 ' + p.questions.length + '�?/span><span>📊 ' + p.totalScore + '�?/span><span>�?' + p.timeLimit + '分钟</span></div>' +
+            '<div class="paper-card-source">🌐 网络搜集</div></div>';
+    }).join('');
+}
+
+function renderGeneratedPapers() {
+    var genPapers = JSON.parse(localStorage.getItem('shenlun_generated_papers') || '[]');
+    var container = document.getElementById('generated-papers-list');
+    if (genPapers.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">暂无生成的试卷，请在上方表单中生�?/p>';
+        return;
+    }
+    container.innerHTML = genPapers.map(function(p) {
+        return '<div class="paper-card" onclick="startPaperExam(\'' + p.id + '\', \'generate\')">' +
+            '<div class="paper-card-header"><div class="paper-card-title">' + p.name + '</div><span class="paper-card-badge badge-sk">AI生成</span></div>' +
+            '<div class="paper-card-meta"><span>📝 ' + p.questions.length + '�?/span><span>📊 ' + p.totalScore + '�?/span><span>�?' + p.timeLimit + '分钟</span></div>' +
+            '<div class="paper-card-source">🤖 AI生成 · ' + (p.topic || '') + '</div></div>';
+    }).join('');
+}
+
+function renderUserPapers() {
+    var userPapers = JSON.parse(localStorage.getItem('shenlun_user_papers') || '[]');
+    var container = document.getElementById('user-papers-list');
+    if (userPapers.length === 0) {
+        container.innerHTML = '<p style="text-align:center;color:var(--text-secondary);padding:20px;">暂无网友上传的试�?/p>';
+        return;
+    }
+    var currentNickname = APP.currentUser ? APP.currentUser.nickname : '';
+    var visible = userPapers.filter(function(p) {
+        if (p.author === currentNickname) return true;
+        return (p.avgRating || 0) >= 2;
+    });
+    visible.sort(function(a, b) {
+        var aLow = (a.avgRating || 0) < 5 ? 1 : 0;
+        var bLow = (b.avgRating || 0) < 5 ? 1 : 0;
+        if (aLow !== bLow) return aLow - bLow;
+        return (b.avgRating || 0) - (a.avgRating || 0);
+    });
+    container.innerHTML = visible.map(function(p) {
+        var ratingCount = (p.ratings || []).length;
+        var isLow = (p.avgRating || 0) < 5;
+        var starsHtml = '';
+        for (var i = 1; i <= 10; i++) { starsHtml += '<span class="rating-star' + (i <= Math.round(p.avgRating || 0) ? ' active' : '') + '">�?/span>'; }
+        return '<div class="paper-card" onclick="startPaperExam(\'' + p.id + '\', \'user\')">' +
+            '<div class="paper-card-header"><div class="paper-card-title">' + p.name + '</div><span class="paper-card-badge badge-sk">网友上传</span></div>' +
+            '<div class="paper-card-meta"><span>📝 ' + p.questions.length + '�?/span><span>📊 ' + p.totalScore + '�?/span><span>�?' + p.timeLimit + '分钟</span></div>' +
+            '<div class="paper-card-author">👤 上传者：' + p.author + '</div>' +
+            '<div class="paper-card-rating"><div class="rating-stars">' + starsHtml + '</div> ' + (p.avgRating || 0).toFixed(1) + ' (' + ratingCount + '人评�?</div>' +
+            '<div class="paper-card-source">👤 网友上传' + (isLow ? ' · 低评�? : '') + '</div></div>';
+    }).join('');
+}
+
+// ========== AI生成试卷 ==========
+function generatePaper() {
+    var topic = document.getElementById('gen-topic').value.trim();
+    var materials = document.getElementById('gen-materials').value.trim();
+    var statusEl = document.getElementById('generate-status');
+    if (!topic) { statusEl.innerHTML = '<span style="color:var(--danger)">请输入试卷主�?/span>'; return; }
+    if (!materials) { statusEl.innerHTML = '<span style="color:var(--danger)">请输入给定资�?/span>'; return; }
+    var contentToCheck = topic + ' ' + materials;
+    for (var i = 0; i < ILLEGAL_KEYWORDS.length; i++) {
+        if (contentToCheck.indexOf(ILLEGAL_KEYWORDS[i]) !== -1) {
+            statusEl.innerHTML = '<span style="color:var(--danger)">�?内容包含违规信息�? + ILLEGAL_KEYWORDS[i] + '），无法生成试卷</span>';
+            return;
+        }
+    }
+    statusEl.innerHTML = '<span style="color:var(--primary)">�?AI正在生成试卷...</span>';
+    setTimeout(function() {
+        var questions = generateQuestionsFromMaterials(topic, materials);
+        var paperId = 'gen_' + Date.now();
+        var totalScore = questions.reduce(function(s, q) { return s + q.maxScore; }, 0);
+        var paper = { id: paperId, name: topic, topic: topic, source: 'generate', questions: questions.map(function(q) { return q.id; }), totalScore: totalScore, timeLimit: 150, createdAt: new Date().toISOString() };
+        questions.forEach(function(q) { APP.questions.push(q); });
+        APP.papers.push(paper);
+        var genPapers = JSON.parse(localStorage.getItem('shenlun_generated_papers') || '[]');
+        genPapers.unshift(paper);
+        localStorage.setItem('shenlun_generated_papers', JSON.stringify(genPapers));
+        var genQuestions = JSON.parse(localStorage.getItem('shenlun_generated_questions') || '[]');
+        questions.forEach(function(q) { genQuestions.push(q); });
+        localStorage.setItem('shenlun_generated_questions', JSON.stringify(genQuestions));
+        statusEl.innerHTML = '<span style="color:var(--success)">�?试卷生成成功！共' + questions.length + '道题�? + totalScore + '�?/span>';
+        document.getElementById('gen-topic').value = '';
+        document.getElementById('gen-materials').value = '';
+        renderGeneratedPapers();
+        updateHomeStats();
+    }, 1500);
+}
+
+function generateQuestionsFromMaterials(topic, materials) {
+    var count = 3 + Math.floor(Math.random() * 3);
+    var questions = [];
+    var questionTypes = [
+        { title: '概括归纳�?, score: 15, template: '根据给定资料，概括{0}的主要做法�? },
+        { title: '综合分析�?, score: 20, template: '根据给定资料，分析{0}的原因及影响�? },
+        { title: '对策建议�?, score: 25, template: '假如你是相关工作人员，请就{0}提出工作建议�? },
+        { title: '大作�?, score: 40, template: '给定资料中提�?{0}"，请深入思考，自选角度，自拟题目，写一篇文章�? }
+    ];
+    var lines = materials.split('\n').filter(function(l) { return l.trim().length > 10; });
+    var keyPhrases = [];
+    for (var i = 0; i < lines.length; i++) {
+        var quotes = lines[i].match(/�?[^」]+)�?g);
+        if (quotes) quotes.forEach(function(q) { keyPhrases.push(q.replace(/[「」]/g, '')); });
+    }
+    if (keyPhrases.length === 0) keyPhrases.push(topic);
+    for (var i = 0; i < count; i++) {
+        var type = questionTypes[i % questionTypes.length];
+        var phrase = keyPhrases[i % keyPhrases.length] || topic;
+        var title = type.template.replace('{0}', phrase);
+        var questionId = 'gen_q_' + Date.now() + '_' + i;
+        var paperId = 'gen_' + Date.now();
+        var requirements = type.score >= 35 ? '要求：（1）观点明确，见解深刻；（2）参考给定资料，但不拘泥于给定资料；�?）思路清晰，语言流畅；（4）字�?000-1200字�? : '要求：全面、准确，有条理；不超�? + (type.score * 20) + '字�?;
+        var refAnswer = generateMockReference(type.title, phrase);
+        var scorePoints = generateMockScorePoints(type.score);
+        var prefix = type.score >= 35 ? '四�? : ['一�?, '二�?, '三�?][i] || ((i + 1) + '�?);
+        questions.push({
+            id: questionId, paperId: paperId, paperName: topic, category: 'AI生成', type: 'AI生成',
+            year: new Date().getFullYear(), questionNum: i + 1,
+            title: prefix + title + '�? + type.score + '分）',
+            requirements: requirements, materials: materials,
+            referenceAnswer: refAnswer, scorePoints: scorePoints, maxScore: type.score, source: 'generate'
+        });
+    }
+    return questions;
+}
+
+function generateMockReference(type, phrase) {
+    if (type === '概括归纳�?) return '根据给定资料�? + phrase + '的主要做法如下：\n\n一、加强顶层设计。出台相关政策文件，明确工作目标和任务分工，建立统筹协调机制。\n\n二、完善基础设施。加大资金投入，推进相关项目建设，提升硬件支撑能力。\n\n三、创新工作机制。运用现代信息技术，优化工作流程，提高工作效率和服务质量。\n\n四、强化监督管理。建立健全考核评价体系，确保各项工作落到实处�?;
+    if (type === '综合分析�?) return phrase + '的原因主要有以下几个方面：\n\n一、政策推动。国家和地方出台了一系列支持政策，为相关工作提供了制度保障。\n\n二、需求驱动。随着经济社会发展，人民群众对相关服务的需求日益增长。\n\n三、技术进步。新技术的应用为解决传统问题提供了新的手段和途径。\n\n其影响体现在：促进了相关领域的发展，提升了服务效能，改善了民生福祉�?;
+    if (type === '对策建议�?) return '�? + phrase + '提出以下建议：\n\n一、完善政策体系。加快出台相关法规政策，明确各方责任义务，为工作推进提供法治保障。\n\n二、加大资金投入。建立多元投入机制，引导社会资本参与，保障工作经费需求。\n\n三、强化科技支撑。运用大数据、人工智能等技术手段，提升工作智能化水平。\n\n四、加强队伍建设。开展专业培训，提升工作人员业务能力和服务水平。\n\n五、健全监督机制。建立全过程监管体系，确保工作规范有序推进�?;
+    return '�? + phrase + '推动高质量发展\n\n当前，我国正处于发展方式转变的关键时期�? + phrase + '作为一个重要课题，对于推动高质量发展具有重要意义。\n\n第一�? + phrase + '是顺应时代发展的必然要求。\n\n第二�? + phrase + '是破解发展难题的有效途径。\n\n第三�? + phrase + '是满足人民需求的重要举措。\n\n推进' + phrase + '，需要多方合力、久久为功。让我们坚定信心，开拓进取，�? + phrase + '的实际成效推动高质量发展迈上新台阶�?;
+}
+
+function generateMockScorePoints(maxScore) {
+    if (maxScore <= 15) return [{ point: '概括全面准确，要点完�?, score: Math.round(maxScore * 0.4) }, { point: '条理清晰，层次分�?, score: Math.round(maxScore * 0.35) }, { point: '语言流畅，表达规�?, score: maxScore - Math.round(maxScore * 0.4) - Math.round(maxScore * 0.35) }];
+    if (maxScore <= 25) return [{ point: '分析全面深入，抓住核心问�?, score: Math.round(maxScore * 0.3) }, { point: '论证充分有力，逻辑严密', score: Math.round(maxScore * 0.25) }, { point: '对策建议具体可行', score: Math.round(maxScore * 0.25) }, { point: '语言表达准确规范', score: maxScore - Math.round(maxScore * 0.3) - Math.round(maxScore * 0.25) - Math.round(maxScore * 0.25) }];
+    return [{ point: '立意明确，紧扣主�?, score: 8 }, { point: '论证充分，论据有�?, score: 8 }, { point: '结构完整，层次分�?, score: 8 }, { point: '语言流畅，表达准�?, score: 8 }, { point: '思想深刻，有独到见解', score: 8 }];
+}
+
+// ========== 网友上传试卷 ==========
+function uploadPaper() {
+    var name = document.getElementById('up-name').value.trim();
+    var desc = document.getElementById('up-desc').value.trim();
+    var questionsRaw = document.getElementById('up-questions').value.trim();
+    var statusEl = document.getElementById('upload-status');
+    if (!name) { statusEl.innerHTML = '<span style="color:var(--danger)">请输入试卷名�?/span>'; return; 
