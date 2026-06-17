@@ -563,9 +563,10 @@ function startExam(paperId, source) {
             showToast('试卷不存在', 'error');
             return;
         }
-        // 如果试卷有内嵌 questions 数组，直接用
-        if (paper.questions && paper.questions.length > 0) {
-            questions = paper.questions;
+        // 如果试卷有 questionIds，从题库按 ID 匹配
+        if (paper.questionIds && paper.questionIds.length > 0) {
+            const qidSet = new Set(paper.questionIds);
+            questions = APP.questions.filter(q => qidSet.has(q.id));
         } else {
             // 否则从题库按 paperId 匹配
             questions = APP.questions.filter(q => q.paperId === paperId);
@@ -590,24 +591,34 @@ function startExam(paperId, source) {
     const examPage = document.getElementById('page-exam-full');
     // 收集所有题目的materials
     let materialsHtml = '';
-    const allMaterials = new Set();
+    const allMaterials = [];
+    const seenMaterials = new Set();
     questions.forEach(q => {
         if (q.materials) {
             if (Array.isArray(q.materials)) {
-                q.materials.forEach(m => allMaterials.add(JSON.stringify(m)));
+                q.materials.forEach(m => {
+                    const key = typeof m === 'string' ? m : JSON.stringify(m);
+                    if (!seenMaterials.has(key)) {
+                        seenMaterials.add(key);
+                        allMaterials.push(m);
+                    }
+                });
             } else if (typeof q.materials === 'string') {
-                allMaterials.add(q.materials);
+                if (!seenMaterials.has(q.materials)) {
+                    seenMaterials.add(q.materials);
+                    allMaterials.push(q.materials);
+                }
             }
         }
     });
-    if (allMaterials.size > 0) {
-        materialsHtml = Array.from(allMaterials).map(m => {
-            try {
-                const obj = JSON.parse(m);
-                return '<div class="material-block"><h4>' + (obj.title || '材料' + (obj.id||'')) + '</h4><p>' + (obj.content || '') + '</p></div>';
-            } catch(e) {
+    if (allMaterials.length > 0) {
+        materialsHtml = allMaterials.map(m => {
+            if (typeof m === 'string') {
                 return '<div class="material-block"><p>' + m.replace(/\n/g, '<br>') + '</p></div>';
+            } else if (m && typeof m === 'object') {
+                return '<div class="material-block"><h4>' + (m.title || ('材料' + (m.id||''))) + '</h4><p>' + (m.content || '') + '</p></div>';
             }
+            return '';
         }).join('');
     } else if (paper.materials) {
         if (Array.isArray(paper.materials)) {
