@@ -1050,6 +1050,10 @@ function startTypePractice(type) {
     } else if (paper && paper.materials) {
         materialsStr = typeof paper.materials === 'string' ? paper.materials : '';
     }
+    // 如果只有来源说明（无完整材料），显示提示
+    if (question._noMaterials && materialsStr && materialsStr.length < 100) {
+        materialsStr = '<p style="color:var(--text-muted);text-align:center;padding:20px;">⚠️ 该题目暂无完整给定资料</p><p style="color:var(--text-secondary);font-size:12px;text-align:center;">' + materialsStr + '</p>';
+    }
     if (!materialsStr) materialsStr = '无给定资料';
     
     // 创建虚拟试卷
