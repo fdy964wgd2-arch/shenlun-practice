@@ -466,11 +466,24 @@ function renderPapersList() {
     }
 
     let papers = [];
-    if (tab === 'real' || tab === 'net') {
+    if (tab === 'real') {
         const catFilter = document.getElementById('filter-category')?.value || 'all';
         const yearFilter = document.getElementById('filter-year')?.value || 'all';
         papers = APP.papers.filter(p => {
-            if (p.source !== tab) return false;
+            // 历年真题：排除 generate 和 user 来源
+            if (p.source === 'generate' || p.source === 'user') return false;
+            if (p.id && p.id.startsWith('practice_')) return false;
+            if (catFilter !== 'all' && p.category !== catFilter) return false;
+            if (yearFilter !== 'all' && String(p.year) !== yearFilter) return false;
+            return true;
+        });
+    } else if (tab === 'net') {
+        // 网络试卷：来自粉笔或其他网络来源
+        const catFilter = document.getElementById('filter-category')?.value || 'all';
+        const yearFilter = document.getElementById('filter-year')?.value || 'all';
+        papers = APP.papers.filter(p => {
+            if (p.source === 'generate' || p.source === 'user') return false;
+            if (p.id && p.id.startsWith('practice_')) return false;
             if (catFilter !== 'all' && p.category !== catFilter) return false;
             if (yearFilter !== 'all' && String(p.year) !== yearFilter) return false;
             return true;
@@ -533,6 +546,9 @@ function renderPapersList() {
 
 // ========== Start Exam ==========
 function startExam(paperId, source) {
+    // 专项练习已经自己设置了 currentExam，直接跳过
+    if (source === 'practice') return;
+    
     let paper, questions;
 
     if (source === 'generate') {
@@ -543,7 +559,17 @@ function startExam(paperId, source) {
         questions = paper?.questions || [];
     } else {
         paper = APP.papers.find(p => p.id === paperId);
-        questions = APP.questions.filter(q => q.paperId === paperId);
+        if (!paper) {
+            showToast('试卷不存在', 'error');
+            return;
+        }
+        // 如果试卷有内嵌 questions 数组，直接用
+        if (paper.questions && paper.questions.length > 0) {
+            questions = paper.questions;
+        } else {
+            // 否则从题库按 paperId 匹配
+            questions = APP.questions.filter(q => q.paperId === paperId);
+        }
     }
 
     if (!paper || questions.length === 0) {
@@ -558,6 +584,38 @@ function startExam(paperId, source) {
 
     // Build exam page
     const examPage = document.getElementById('page-exam-full');
+    // 收集所有题目的materials
+    let materialsHtml = '';
+    const allMaterials = new Set();
+    questions.forEach(q => {
+        if (q.materials) {
+            if (Array.isArray(q.materials)) {
+                q.materials.forEach(m => allMaterials.add(JSON.stringify(m)));
+            } else if (typeof q.materials === 'string') {
+                allMaterials.add(q.materials);
+            }
+        }
+    });
+    if (allMaterials.size > 0) {
+        materialsHtml = Array.from(allMaterials).map(m => {
+            try {
+                const obj = JSON.parse(m);
+                return '<div class="material-block"><h4>' + (obj.title || '材料' + (obj.id||'')) + '</h4><p>' + (obj.content || '') + '</p></div>';
+            } catch(e) {
+                return '<div class="material-block"><p>' + m.replace(/\n/g, '<br>') + '</p></div>';
+            }
+        }).join('');
+    } else if (paper.materials) {
+        if (Array.isArray(paper.materials)) {
+            materialsHtml = paper.materials.map(m => 
+                '<div class="material-block"><h4>' + (m.title || '材料' + m.id) + '</h4><p>' + (m.content || '') + '</p></div>'
+            ).join('');
+        } else if (typeof paper.materials === 'string') {
+            materialsHtml = paper.materials.replace(/\n/g, '<br>');
+        }
+    }
+    if (!materialsHtml) materialsHtml = '<p style="color:var(--text-muted);text-align:center;padding:40px;">无给定资料</p>';
+    
     examPage.innerHTML = '<div class="exam-header">' +
         '<button class="btn btn-outline btn-sm" onclick="navigateTo(\'papers\')">← 返回</button>' +
         '<div class="exam-info"><h2>' + paper.title + '</h2>' +
@@ -567,7 +625,7 @@ function startExam(paperId, source) {
         '<div class="exam-body-split">' +
         '<div class="exam-materials-panel">' +
         '<div class="materials-header">📄 给定资料</div>' +
-        '<div class="materials-content" id="exam-materials">' + (paper.materials || '无给定资料') + '</div>' +
+        '<div class="materials-content" id="exam-materials">' + materialsHtml + '</div>' +
         '</div>' +
         '<div class="exam-questions-panel">' +
         '<div class="exam-questions-scroll"><div class="exam-questions" id="exam-questions"></div></div>' +
@@ -658,6 +716,7 @@ function submitExam() {
         paperId: paper.id,
         paperTitle: paper.title,
         source: source,
+        category: source === 'practice' ? (paper.practiceType || '专项练习') : (source === 'real' ? '历年真题' : source === 'net' ? '网络试卷' : source === 'generate' ? 'AI生成' : '网友上传'),
         totalScore: totalScore,
         maxScore: maxScore,
         timeUsed: APP.examSeconds,
@@ -867,24 +926,47 @@ function renderHistory() {
         return;
     }
 
-    container.innerHTML = '<div class="history-list">' + APP.history.map(h => {
-        const date = new Date(h.createdAt);
-        const dateStr = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
-        const timeMin = Math.floor(h.timeUsed / 60);
-        return '<div class="history-item" onclick="navigateTo(\'history-detail\', \'' + h.id + '\')">' +
-            '<div class="history-item-left">' +
-            '<div class="history-item-icon">📝</div>' +
-            '<div class="history-item-info">' +
-            '<h4>' + h.paperTitle + '</h4>' +
-            '<div class="history-item-meta">' +
-            '<span>📅 ' + dateStr + '</span>' +
-            '<span>⏱ ' + timeMin + '分钟</span>' +
-            '</div></div></div>' +
-            '<div class="history-item-right">' +
-            '<div class="history-score">' + h.totalScore + '</div>' +
-            '<div class="history-score-label">/ ' + h.maxScore + '分</div>' +
-            '</div></div>';
-    }).join('') + '</div>';
+    // 按分类分组
+    const categories = ['概括归纳', '综合分析', '对策建议', '大作文', '历年真题', '网络试卷', 'AI生成', '网友上传'];
+    const grouped = {};
+    categories.forEach(c => { grouped[c] = []; });
+    APP.history.forEach(h => {
+        const cat = h.category || h.source || '历年真题';
+        if (grouped[cat]) {
+            grouped[cat].push(h);
+        } else {
+            if (!grouped['历年真题']) grouped['历年真题'] = [];
+            grouped['历年真题'].push(h);
+        }
+    });
+
+    let html = '';
+    categories.forEach(cat => {
+        const items = grouped[cat] || [];
+        if (items.length === 0) return;
+        html += '<div class="history-category"><h3 class="history-cat-title">' + cat + '（' + items.length + '条）</h3>';
+        html += items.map(h => {
+            const date = new Date(h.createdAt);
+            const dateStr = date.getFullYear() + '-' + String(date.getMonth() + 1).padStart(2, '0') + '-' + String(date.getDate()).padStart(2, '0');
+            const timeMin = Math.floor(h.timeUsed / 60);
+            return '<div class="history-item" onclick="navigateTo(\'history-detail\', \'' + h.id + '\')">' +
+                '<div class="history-item-left">' +
+                '<div class="history-item-icon">📝</div>' +
+                '<div class="history-item-info">' +
+                '<h4>' + h.paperTitle + '</h4>' +
+                '<div class="history-item-meta">' +
+                '<span>📅 ' + dateStr + '</span>' +
+                '<span>⏱ ' + timeMin + '分钟</span>' +
+                '</div></div></div>' +
+                '<div class="history-item-right">' +
+                '<div class="history-score">' + h.totalScore + '</div>' +
+                '<div class="history-score-label">/ ' + h.maxScore + '分</div>' +
+                '</div></div>';
+        }).join('');
+        html += '</div>';
+    });
+
+    container.innerHTML = html || '<div class="history-empty"><div class="history-empty-icon">📭</div><h3>暂无答题记录</h3></div>';
 }
 
 // ========== History Detail ==========
@@ -913,17 +995,81 @@ function startTypePractice(type) {
         showToast('暂无该类型题目', 'info');
         return;
     }
-    // Create a virtual paper
-    const paper = {
-        id: 'practice_' + type,
-        title: '专项练习 - ' + type,
-        totalScore: questions.reduce((s, q) => s + (q.score || 0), 0),
-        timeLimit: 120,
-        materials: questions[0]?.materials || '',
-        source: 'real'
+    // 随机抽取一道题
+    const randomIdx = Math.floor(Math.random() * questions.length);
+    const question = questions[randomIdx];
+    
+    // 找到该题目对应的试卷以获取材料
+    const paper = APP.papers.find(p => p.id === question.paperId);
+    
+    // 创建虚拟试卷，只包含这一道题
+    const virtualPaper = {
+        id: 'practice_' + type + '_' + Date.now(),
+        title: '专项练习 - ' + type + '（来源：' + (paper?.title || '未知') + '）',
+        totalScore: question.score || question.maxScore || 20,
+        timeLimit: 60,
+        materials: question.materials || paper?.materials || '',
+        source: 'practice',
+        practiceType: type
     };
-    APP.papers.unshift(paper);
-    startExam(paper.id, 'real');
+    
+    // 把这道题包装成包含必要字段的格式
+    const wrappedQuestion = {
+        ...question,
+        score: question.score || question.maxScore || 20,
+        content: question.question || question.title || '',
+        question: question.question || question.title || '',
+        reference: question.referenceAnswer || question.reference || '暂无参考答案'
+    };
+    
+    APP.currentExam = { 
+        paper: virtualPaper, 
+        questions: [wrappedQuestion], 
+        source: 'practice', 
+        answers: {} 
+    };
+    APP.currentExamPaperId = virtualPaper.id;
+    APP.currentExamSource = 'practice';
+    APP.examSeconds = 0;
+
+    // Build exam page
+    const examPage = document.getElementById('page-exam-full');
+    examPage.innerHTML = '<div class="exam-header">' +
+        '<button class="btn btn-outline btn-sm" onclick="navigateTo(\'practice\')">← 返回</button>' +
+        '<div class="exam-info"><h2>' + virtualPaper.title + '</h2>' +
+        '<div class="exam-meta"><span>📝 1题</span><span>📊 总分' + virtualPaper.totalScore + '分</span></div></div>' +
+        '<div class="exam-timer" id="exam-timer">00:00</div>' +
+        '</div>' +
+        '<div class="exam-body-split">' +
+        '<div class="exam-materials-panel">' +
+        '<div class="materials-header">📄 给定资料</div>' +
+        '<div class="materials-content" id="exam-materials">' + (virtualPaper.materials || '无给定资料') + '</div>' +
+        '</div>' +
+        '<div class="exam-questions-panel">' +
+        '<div class="exam-questions-scroll"><div class="exam-questions" id="exam-questions"></div></div>' +
+        '<div class="exam-footer"><button class="btn btn-primary btn-lg" onclick="submitExam()">📝 提交答卷</button></div>' +
+        '</div></div>';
+
+    const qContainer = document.getElementById('exam-questions');
+    qContainer.innerHTML = '<div class="question-card">' +
+        '<div class="question-header">' +
+        '<div class="question-title">' + (wrappedQuestion.title || wrappedQuestion.type || '题目') + '</div>' +
+        '<div class="question-score">' + wrappedQuestion.score + '分</div>' +
+        '</div>' +
+        '<div class="question-body">' +
+        '<div class="requirements-text">' + (wrappedQuestion.content || wrappedQuestion.question || '') + '</div>' +
+        '<div class="answer-area">' +
+        '<label>✍️ 你的答案</label>' +
+        '<textarea class="answer-textarea" id="answer-0" placeholder="请在此作答..." oninput="updateWordCount(\'0\')"></textarea>' +
+        '<div class="word-count" id="wc-0">0字</div>' +
+        '</div></div></div>';
+
+    document.getElementById('sidebar').style.display = 'none';
+    document.getElementById('breadcrumb').style.display = 'none';
+    document.getElementById('main-content').style.marginLeft = '0';
+
+    navigateTo('exam');
+    startTimer();
 }
 
 // ========== AI Generate Paper ==========
