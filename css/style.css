@@ -451,12 +451,23 @@ a:hover { text-decoration: underline; }
 
 .requirements-text {
     font-size: 14px;
-    color: var(--warning);
-    background: #fffbeb;
+    color: var(--text-primary);
+    background: #f0f9ff;
     padding: 10px 14px;
+    border-radius: var(--radius);
+    margin-bottom: 8px;
+    border: 1px solid #bae6fd;
+    line-height: 1.7;
+}
+.question-requirements {
+    font-size: 13px;
+    color: var(--text-secondary);
+    background: #fffbeb;
+    padding: 8px 14px;
     border-radius: var(--radius);
     margin-bottom: 16px;
     border: 1px solid #fde68a;
+    line-height: 1.6;
 }
 
 .answer-area { margin-top: 12px; }

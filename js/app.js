@@ -656,7 +656,8 @@ function startExam(paperId, source) {
             '<div class="question-score">' + (q.score || q.maxScore || 0) + '分</div>' +
             '</div>' +
             '<div class="question-body">' +
-            '<div class="requirements-text">' + (q.content || q.question || '') + '</div>' +
+            '<div class="requirements-text">' + (q.content || q.question || q.title || '') + '</div>' +
+            (q.requirements ? '<div class="question-requirements">📋 ' + q.requirements + '</div>' : '') +
             '<div class="answer-area">' +
             '<label>✍️ 你的答案</label>' +
             '<textarea class="answer-textarea" id="answer-' + i + '" placeholder="请在此作答..." oninput="updateWordCount(\'' + i + '\')"></textarea>' +
@@ -1115,6 +1116,7 @@ function startTypePractice(type) {
         '</div>' +
         '<div class="question-body">' +
         '<div class="requirements-text">' + (wrappedQuestion.content || wrappedQuestion.question || '') + '</div>' +
+        (wrappedQuestion.requirements ? '<div class="question-requirements">📋 ' + wrappedQuestion.requirements + '</div>' : '') +
         '<div class="answer-area">' +
         '<label>✍️ 你的答案</label>' +
         '<textarea class="answer-textarea" id="answer-0" placeholder="请在此作答..." oninput="updateWordCount(\'0\')"></textarea>' +
