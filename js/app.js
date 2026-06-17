@@ -573,7 +573,11 @@ function startExam(paperId, source) {
     }
 
     if (!paper || questions.length === 0) {
-        showToast('试卷数据异常', 'error');
+        if (paper && paper.questionCount === 0 && !paper.questions) {
+            showToast('该试卷暂无题目数据，请选择其他试卷', 'info');
+        } else {
+            showToast('试卷数据异常', 'error');
+        }
         return;
     }
 
@@ -983,10 +987,26 @@ function renderHistoryDetail(recordId) {
 function updatePracticeCounts() {
     const types = ['概括归纳', '综合分析', '对策建议', '大作文'];
     types.forEach(type => {
-        const count = APP.questions.filter(q => q.type === type).length;
+        const total = APP.questions.filter(q => q.type === type).length;
+        const answeredIds = new Set(APP.history.filter(h => h.category === type).map(h => h.paperId));
+        const answered = APP.questions.filter(q => q.type === type && answeredIds.has(q.id)).length;
         const el = document.getElementById('count-' + type);
-        if (el) el.textContent = count + '题可用';
+        if (el) {
+            if (answered > 0) {
+                el.textContent = total + '题可用 | 已答' + answered + '题 | 未答' + (total - answered) + '题';
+            } else {
+                el.textContent = total + '题可用';
+            }
+        }
     });
+}
+
+function skipPracticeQuestion(type) {
+    clearExam();
+    document.getElementById('sidebar').style.display = '';
+    document.getElementById('breadcrumb').style.display = '';
+    document.getElementById('main-content').style.marginLeft = '';
+    startTypePractice(type);
 }
 
 function startTypePractice(type) {
@@ -995,25 +1015,44 @@ function startTypePractice(type) {
         showToast('暂无该类型题目', 'info');
         return;
     }
-    // 随机抽取一道题
-    const randomIdx = Math.floor(Math.random() * questions.length);
-    const question = questions[randomIdx];
+    // 随机抽取一道未答过的题
+    const answeredIds = new Set(APP.history.filter(h => h.category === type).map(h => h.paperId));
+    const unanswered = questions.filter(q => !answeredIds.has(q.id));
+    const pool = unanswered.length > 0 ? unanswered : questions;
+    const randomIdx = Math.floor(Math.random() * pool.length);
+    const question = pool[randomIdx];
     
     // 找到该题目对应的试卷以获取材料
     const paper = APP.papers.find(p => p.id === question.paperId);
     
-    // 创建虚拟试卷，只包含这一道题
+    // 处理 materials（可能是字符串或数组）
+    let materialsStr = '';
+    if (question.materials) {
+        if (Array.isArray(question.materials)) {
+            materialsStr = question.materials.map(m => {
+                if (typeof m === 'string') return m;
+                return (m.title ? ('<b>' + m.title + '</b><br>') : '') + (m.content || '');
+            }).join('<br><br>');
+        } else if (typeof question.materials === 'string') {
+            materialsStr = question.materials;
+        }
+    } else if (paper && paper.materials) {
+        materialsStr = typeof paper.materials === 'string' ? paper.materials : '';
+    }
+    if (!materialsStr) materialsStr = '无给定资料';
+    
+    // 创建虚拟试卷
     const virtualPaper = {
-        id: 'practice_' + type + '_' + Date.now(),
-        title: '专项练习 - ' + type + '（来源：' + (paper?.title || '未知') + '）',
+        id: question.id,
+        title: '专项练习 - ' + type,
+        subtitle: '来源：' + (paper?.title || '未知'),
         totalScore: question.score || question.maxScore || 20,
         timeLimit: 60,
-        materials: question.materials || paper?.materials || '',
+        materials: materialsStr,
         source: 'practice',
         practiceType: type
     };
     
-    // 把这道题包装成包含必要字段的格式
     const wrappedQuestion = {
         ...question,
         score: question.score || question.maxScore || 20,
@@ -1028,27 +1067,30 @@ function startTypePractice(type) {
         source: 'practice', 
         answers: {} 
     };
-    APP.currentExamPaperId = virtualPaper.id;
+    APP.currentExamPaperId = question.id;
     APP.currentExamSource = 'practice';
     APP.examSeconds = 0;
 
     // Build exam page
     const examPage = document.getElementById('page-exam-full');
     examPage.innerHTML = '<div class="exam-header">' +
-        '<button class="btn btn-outline btn-sm" onclick="navigateTo(\'practice\')">← 返回</button>' +
+        '<button class="btn btn-outline btn-sm" onclick="navigateTo(\'practice\')">← 返回专项练习</button>' +
         '<div class="exam-info"><h2>' + virtualPaper.title + '</h2>' +
+        '<p style="color:var(--text-secondary);font-size:13px;">' + virtualPaper.subtitle + '</p>' +
         '<div class="exam-meta"><span>📝 1题</span><span>📊 总分' + virtualPaper.totalScore + '分</span></div></div>' +
         '<div class="exam-timer" id="exam-timer">00:00</div>' +
         '</div>' +
         '<div class="exam-body-split">' +
         '<div class="exam-materials-panel">' +
         '<div class="materials-header">📄 给定资料</div>' +
-        '<div class="materials-content" id="exam-materials">' + (virtualPaper.materials || '无给定资料') + '</div>' +
+        '<div class="materials-content" id="exam-materials">' + materialsStr.replace(/\n/g, '<br>') + '</div>' +
         '</div>' +
         '<div class="exam-questions-panel">' +
         '<div class="exam-questions-scroll"><div class="exam-questions" id="exam-questions"></div></div>' +
-        '<div class="exam-footer"><button class="btn btn-primary btn-lg" onclick="submitExam()">📝 提交答卷</button></div>' +
-        '</div></div>';
+        '<div class="exam-footer">' +
+        '<button class="btn btn-primary btn-lg" onclick="submitExam()">📝 提交答卷</button>' +
+        '<button class="btn btn-outline" style="margin-left:8px;" onclick="skipPracticeQuestion(\'' + type + '\')">⏭ 换一题</button>' +
+        '</div></div></div>';
 
     const qContainer = document.getElementById('exam-questions');
     qContainer.innerHTML = '<div class="question-card">' +
