@@ -1254,24 +1254,148 @@ function showUploadForm() {
 
     container.innerHTML = '<div class="manual-form">' +
         '<h3>📤 上传申论试卷</h3>' +
-        '<p style="color:var(--text-secondary);margin-bottom:16px;">上传的试卷将经过AI审核，合格后显示在「网友上传」栏目中</p>' +
+        '<p style="color:var(--text-secondary);margin-bottom:16px;">上传的试卷将经过审核，合格后显示在「网友上传」栏目中</p>' +
         '<div class="form-group"><label>试卷标题</label>' +
         '<input type="text" id="upload-title" placeholder="如：2024年某省申论模拟卷"></div>' +
         '<div class="form-group"><label>给定资料</label>' +
         '<textarea id="upload-materials" rows="6" placeholder="请输入或粘贴给定资料..."></textarea></div>' +
-        '<div class="form-group"><label>题目列表（JSON格式）</label>' +
-        '<textarea id="upload-questions" rows="10" placeholder=\'[{\"title\":\"概括题\",\"content\":\"请根据资料概括...\",\"score\":20,\"reference\":\"参考答案...\",\"scorePoints\":[{\"keywords\":[\"关键词1\",\"关键词2\"]}]}]\'></textarea>' +
-        '<p style="font-size:12px;color:var(--text-muted);">至少2道题，需包含题目、分值、参考答案和评分要点</p></div>' +
+        '<div class="form-group"><label>题目内容（一键粘贴，自动识别分题）</label>' +
+        '<textarea id="upload-questions-text" rows="12" placeholder="将全部题目粘贴到这里，AI会自动识别分为第1题、第2题...\n\n支持格式：\n1. 概括主要问题。（20分）\n要求：全面准确，不超过200字。\n\n2. 分析原因并提出对策。（30分）\n要求：观点明确，不超过400字。\n\n3. 写一篇议论文。（50分）\n要求：自拟题目，字数1000-1200字。"></textarea>' +
+        '<p style="font-size:12px;color:var(--text-muted);">支持"1."、"第1题"、"一、"等编号格式，AI自动识别题目、分值和字数要求</p></div>' +
+        '<div class="form-group" id="parsed-questions-group" style="display:none;">' +
+        '<label>✅ 已识别题目预览</label>' +
+        '<div id="parsed-questions-preview" style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:12px;max-height:300px;overflow-y:auto;"></div>' +
+        '</div>' +
         '<div class="modal-error" id="upload-error"></div>' +
         '<button class="btn btn-primary" onclick="submitUploadPaper()">📤 提交审核</button>' +
         '<button class="btn btn-outline" style="margin-left:8px;" onclick="renderPapersList()">取消</button>' +
         '</div>';
+
+    // 绑定实时解析
+    const textarea = document.getElementById('upload-questions-text');
+    if (textarea) {
+        textarea.addEventListener('input', function() {
+            parseUploadQuestions();
+        });
+    }
+}
+
+// AI自动解析题目文本
+function parseUploadQuestions() {
+    const text = document.getElementById('upload-questions-text')?.value.trim();
+    const previewGroup = document.getElementById('parsed-questions-group');
+    const preview = document.getElementById('parsed-questions-preview');
+    if (!text || !previewGroup || !preview) return;
+
+    const questions = smartSplitQuestions(text);
+    if (questions.length === 0) {
+        previewGroup.style.display = 'none';
+        return;
+    }
+
+    previewGroup.style.display = 'block';
+    preview.innerHTML = questions.map((q, i) => {
+        const scoreHtml = q.score ? '<span style="color:#059669;font-weight:600;">' + q.score + '分</span>' : '';
+        const wordHtml = q.wordLimit ? '<span style="color:#6366f1;">📝 ' + q.wordLimit + '字</span>' : '';
+        return '<div style="padding:8px 0;border-bottom:1px solid #d1fae5;">' +
+            '<strong>第' + (i + 1) + '题</strong> ' + scoreHtml + ' ' + wordHtml +
+            '<div style="color:#374151;margin-top:4px;">' + escapeHtml(q.title || q.content || '').substring(0, 80) + '</div>' +
+            (q.requirements ? '<div style="color:#6b7280;font-size:12px;margin-top:2px;">📋 ' + escapeHtml(q.requirements).substring(0, 60) + '</div>' : '') +
+            '</div>';
+    }).join('');
+
+    // 存储解析结果
+    window._parsedQuestions = questions;
+}
+
+// 智能分题
+function smartSplitQuestions(text) {
+    if (!text || !text.trim()) return [];
+
+    let parts = [];
+
+    // 模式1: "第X题" 或 "第X题："
+    if (/第\s*[一二三四五六七八九十\d]+\s*题/.test(text)) {
+        parts = text.split(/(?=第\s*[一二三四五六七八九十\d]+\s*题)/);
+    }
+    // 模式2: 数字编号 "1." "1、" "1)" 等（行首）
+    else if (/\n\s*\d+[.、)）]/.test('\n' + text)) {
+        parts = text.split(/\n(?=\s*\d+[.、)）])/);
+    }
+    // 模式3: 中文数字 "一、" "二、"
+    else if (/\n\s*[一二三四五六七八九十]+[、．.]/.test('\n' + text)) {
+        parts = text.split(/\n(?=\s*[一二三四五六七八九十]+[、．.])/);
+    }
+    else {
+        parts = [text];
+    }
+
+    parts = parts.filter(p => p.trim().length > 5);
+
+    return parts.map(part => {
+        let content = part.trim();
+        // 去掉编号前缀
+        content = content.replace(/^第?\s*[一二三四五六七八九十\d]+\s*[题]?[：:、.）)]?\s*/, '').trim();
+        content = content.replace(/^[一二三四五六七八九十]+[、．.]\s*/, '').trim();
+        content = content.replace(/^\d+[.、)）]\s*/, '').trim();
+
+        // 提取分值 (XX分)
+        let score = null;
+        const scoreMatch = content.match(/[（(]\s*(\d+)\s*分\s*[）)]/);
+        if (scoreMatch) {
+            score = parseInt(scoreMatch[1]);
+            content = content.replace(scoreMatch[0], '').trim();
+        }
+
+        // 分离题目和要求
+        let title = content;
+        let requirements = '';
+        const reqMatch = content.match(/\n\s*要求[：:]/);
+        if (reqMatch) {
+            title = content.substring(0, reqMatch.index).trim();
+            requirements = content.substring(reqMatch.index).replace(/^\s*要求[：:]\s*/, '').trim();
+        }
+
+        // 提取字数要求
+        let wordLimit = null;
+        const wordMatch = (requirements || title).match(/(\d+)\s*[-–—至到]\s*(\d+)\s*字/);
+        if (wordMatch) {
+            wordLimit = wordMatch[1] + '-' + wordMatch[2];
+        } else {
+            const wm = (requirements || title).match(/(?:不超过|不多于)\s*(\d+)\s*字/);
+            if (wm) wordLimit = '≤' + wm[1];
+            else {
+                const wm2 = (requirements || title).match(/(?:不少于|不低于)\s*(\d+)\s*字/);
+                if (wm2) wordLimit = '≥' + wm2[1];
+                else {
+                    const wm3 = (requirements || title).match(/(\d+)\s*字左右/);
+                    if (wm3) wordLimit = '≈' + wm3[1];
+                }
+            }
+        }
+
+        return {
+            title: title,
+            content: title,
+            requirements: requirements,
+            score: score || 20,
+            wordLimit: wordLimit,
+            reference: '',
+            scorePoints: []
+        };
+    });
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
 }
 
 function submitUploadPaper() {
     const title = document.getElementById('upload-title').value.trim();
     const materials = document.getElementById('upload-materials').value.trim();
-    const questionsRaw = document.getElementById('upload-questions').value.trim();
+    const questionsRaw = document.getElementById('upload-questions-text').value.trim();
     const errEl = document.getElementById('upload-error');
 
     if (!title) { errEl.textContent = '请输入试卷标题'; return; }
@@ -1285,32 +1409,22 @@ function submitUploadPaper() {
         }
     }
 
-    let questions;
-    try {
-        questions = JSON.parse(questionsRaw);
-    } catch(e) {
-        errEl.textContent = '题目JSON格式错误，请检查';
-        return;
+    // 使用已解析的题目，或现场解析
+    let questions = window._parsedQuestions;
+    if (!questions || questions.length === 0) {
+        questions = smartSplitQuestions(questionsRaw);
     }
 
-    if (!Array.isArray(questions) || questions.length < 2) {
-        errEl.textContent = '至少需要2道题';
+    if (!questions || questions.length < 2) {
+        errEl.textContent = '至少需要2道题，请检查题目格式（支持"1."、"第1题"、"一、"等编号）';
         return;
     }
 
     // Validate each question
     for (let i = 0; i < questions.length; i++) {
         const q = questions[i];
-        if (!q.title || !q.content) {
-            errEl.textContent = '第' + (i + 1) + '题缺少标题或题目内容';
-            return;
-        }
-        if (!q.score || q.score <= 0) {
-            errEl.textContent = '第' + (i + 1) + '题缺少有效分值';
-            return;
-        }
-        if (!q.reference || q.reference.length < 10) {
-            errEl.textContent = '第' + (i + 1) + '题缺少参考答案（至少10字）';
+        if (!q.title || q.title.length < 3) {
+            errEl.textContent = '第' + (i + 1) + '题内容过短';
             return;
         }
     }
@@ -1334,6 +1448,6 @@ function submitUploadPaper() {
     saveUploadedPapers();
     loadUploadedPapers();
 
-    showToast('试卷上传成功！已通过AI审核', 'success');
+    showToast('试卷上传成功！', 'success');
     renderPapersList();
 }
